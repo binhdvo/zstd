@@ -6158,7 +6158,8 @@ size_t ZSTD_endStream(ZSTD_CStream* zcs, ZSTD_outBuffer* output)
 /*-=====  Pre-defined compression levels  =====-*/
 
 #define ZSTD_MAX_CLEVEL     22
-int ZSTD_maxCLevel(void) { return ZSTD_MAX_CLEVEL; }
+#define ZSTD_MAX_CLEVEL_32  21
+int ZSTD_maxCLevel(void) { return sizeof(void *) == 8 ? ZSTD_MAX_CLEVEL : ZSTD_MAX_CLEVEL_32; }
 int ZSTD_minCLevel(void) { return (int)-ZSTD_TARGETLENGTH_MAX; }
 int ZSTD_defaultCLevel(void) { return ZSTD_CLEVEL_DEFAULT; }
 

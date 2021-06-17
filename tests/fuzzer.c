@@ -1978,7 +1978,7 @@ static int basicUnitTests(U32 const seed, double compressibility)
             int const rowLevelEnd = 8;
 
             DISPLAYLEVEL(3, "test%3i : flat-dictionary efficiency test : \n", testNb++);
-            assert(maxLevel == 22);
+            assert(maxLevel == (sizeof(void *) == 8 ? 22 : 21));
             RDG_genBuffer(CNBuffer, flatdictSize + contentSize, compressibility, 0., seed);
             DISPLAYLEVEL(4, "content hash : %016llx;  dict hash : %016llx \n", XXH64(contentStart, contentSize, 0), XXH64(dict, flatdictSize, 0));
 
