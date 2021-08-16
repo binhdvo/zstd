@@ -168,6 +168,8 @@ struct ZSTD_DCtx_s
 
     /* workspace */
     BYTE* litBuffer;
+    BYTE* litBufferEnd;
+    BYTE litExtraBuffer[ZSTD_LITBUFFEREXTRASIZE + WILDCOPY_OVERLENGTH];
     BYTE headerBuffer[ZSTD_FRAMEHEADERSIZE_MAX];
 
     size_t oversizedDuration;

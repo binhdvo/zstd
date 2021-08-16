@@ -1109,6 +1109,7 @@ ZSTDLIB_API size_t ZSTD_sizeof_DDict(const ZSTD_DDict* ddict);
 #define ZSTD_FRAMEHEADERSIZE_MIN(format)    ((format) == ZSTD_f_zstd1 ? 6 : 2)
 #define ZSTD_FRAMEHEADERSIZE_MAX   18   /* can be useful for static allocation */
 #define ZSTD_SKIPPABLEHEADERSIZE    8
+#define ZSTD_LITBUFFEREXTRASIZE    1024 /* extra buffer reduces amount of dst required to store litBuffer */
 
 /* compression parameter bounds */
 #define ZSTD_WINDOWLOG_MAX_32    30
