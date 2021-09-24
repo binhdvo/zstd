@@ -26,7 +26,6 @@
 #include "zstd_decompress_internal.h"   /* ZSTD_DCtx */
 #include "zstd_ddict.h"  /* ZSTD_DDictDictContent */
 #include "zstd_decompress_block.h"
-#include <stdio.h>
 
 /*_*******************************************************
 *  Macros
@@ -67,6 +66,42 @@ size_t ZSTD_getcBlockSize(const void* src, size_t srcSize,
         if (bpPtr->blockType == bt_rle) return 1;
         RETURN_ERROR_IF(bpPtr->blockType == bt_reserved, corruption_detected, "");
         return cSize;
+    }
+}
+
+/* Allocate buffer for literals, either overlapping current dst, or split between dst and litExtraBuffer, or stored entirely within litExtraBuffer */
+static void ZSTD_allocateLiteralsBuffer(const streaming_operation streaming, void* const dst, const size_t dstCapacity, const size_t litSize,
+                                        ZSTD_DCtx* dctx, const size_t expectedWriteSize, const unsigned splitImmediately)
+{
+    if (streaming == not_streaming && dstCapacity > ZSTD_BLOCKSIZE_MAX + 2 * WILDCOPY_OVERLENGTH)
+    {
+        /* room for litbuffer to fit without being stomped by output or read faulting */
+        dctx->litBuffer = (BYTE*)dst + ZSTD_BLOCKSIZE_MAX + WILDCOPY_OVERLENGTH - litSize;
+        dctx->litBufferEnd = dctx->litBuffer + litSize;
+        dctx->litLocation = ZSTD_lit_in_dst;
+    }
+    else if (litSize > ZSTD_LITBUFFEREXTRASIZE)
+    {
+        /* won't fit in litExtraBuffer, so it will be split between end of dst and extra buffer */
+        if (splitImmediately) {
+            /* won't fit in litExtraBuffer, so it will be split between end of dst and extra buffer */
+            dctx->litBuffer = (BYTE*)dst + expectedWriteSize - litSize + ZSTD_LITBUFFEREXTRASIZE - WILDCOPY_OVERLENGTH;
+            dctx->litBufferEnd = dctx->litBuffer + litSize - ZSTD_LITBUFFEREXTRASIZE;
+            dctx->litLocation = ZSTD_lit_is_split;
+        }
+        else {
+            /* initially this will be stored entirely in dst during huffman decoding, it will partially shifted to litExtraBuffer after */
+            dctx->litBuffer = (BYTE*)dst + expectedWriteSize - litSize;
+            dctx->litBufferEnd = (BYTE*)dst + expectedWriteSize;
+        }
+        dctx->litLocation = ZSTD_lit_is_split;
+    }
+    else
+    {
+        /* fits entirely within litExtraBuffer, so no split is necessary */
+        dctx->litBuffer = dctx->litExtraBuffer;
+        dctx->litBufferEnd = dctx->litBuffer + litSize;
+        dctx->litLocation = ZSTD_lit_safe;
     }
 }
 
@@ -131,32 +166,11 @@ size_t ZSTD_decodeLiteralsBlock(ZSTD_DCtx* dctx,
                     litCSize = (lhc >> 22) + ((size_t)istart[4] << 10);
                     break;
                 }
-                RETURN_ERROR_IF(litSize > 0 && dst == NULL, dstSize_tooSmall, "NULL not handled");
                 RETURN_ERROR_IF(litSize > ZSTD_BLOCKSIZE_MAX, corruption_detected, "");
                 RETURN_ERROR_IF(litCSize + lhSize > srcSize, corruption_detected, "");
+                RETURN_ERROR_IF(litSize > 0 && dst == NULL, dstSize_tooSmall, "NULL not handled");
                 RETURN_ERROR_IF(expectedWriteSize < litSize , dstSize_tooSmall, "");
-                if (streaming == not_streaming && dstCapacity > ZSTD_BLOCKSIZE_MAX + 2 * WILDCOPY_OVERLENGTH)
-                {
-                    /* room for litbuffer to fit without being stomped by output or read faulting */
-                    dctx->litBuffer = (BYTE*)dst + ZSTD_BLOCKSIZE_MAX + WILDCOPY_OVERLENGTH - litSize;
-                    dctx->litBufferEnd = dctx->litBuffer + litSize;
-                    dctx->litLocation = ZSTD_lit_in_dst;
-                }
-                else if (litSize > ZSTD_LITBUFFEREXTRASIZE)
-                {
-                    /* won't fit in litExtraBuffer, so it will be split between end of dst and extra buffer */
-                    /* initially this will be stored entirely in dst during huffman decoding, it will partially shifted to litExtraBuffer after */
-                    dctx->litBuffer = (BYTE*)dst + expectedWriteSize - litSize; 
-                    dctx->litBufferEnd = (BYTE*)dst + expectedWriteSize;
-                    dctx->litLocation = ZSTD_lit_is_split;
-                }
-                else
-                {
-                    /* fits entirely within litExtraBuffer, so no split is necessary */
-                    dctx->litBuffer = dctx->litExtraBuffer;
-                    dctx->litBufferEnd = dctx->litBuffer + litSize;
-                    dctx->litLocation = ZSTD_lit_safe;
-                }
+                ZSTD_allocateLiteralsBuffer(streaming, dst, dstCapacity, litSize, dctx, expectedWriteSize, 0);
 
                 /* prefetch huffman table if cold */
                 if (dctx->ddictIsCold && (litSize > 768 /* heuristic */)) {
@@ -195,6 +209,8 @@ size_t ZSTD_decodeLiteralsBlock(ZSTD_DCtx* dctx,
                 }
                 if (dctx->litLocation == ZSTD_lit_is_split)
                 {
+                    /* Literals were initially decoded in dst, we now split off ZSTD_LITBUFFEREXTRASIZE into the litExtraBuffer
+                     * to prevent output from catching up to the literal buffer and stomping it during decompression */
                     ZSTD_memcpy(dctx->litExtraBuffer, dctx->litBufferEnd - ZSTD_LITBUFFEREXTRASIZE, ZSTD_LITBUFFEREXTRASIZE);
                     ZSTD_memmove(dctx->litBuffer + ZSTD_LITBUFFEREXTRASIZE - WILDCOPY_OVERLENGTH, dctx->litBuffer, litSize - ZSTD_LITBUFFEREXTRASIZE);
                     dctx->litBuffer += ZSTD_LITBUFFEREXTRASIZE - WILDCOPY_OVERLENGTH;
@@ -232,28 +248,7 @@ size_t ZSTD_decodeLiteralsBlock(ZSTD_DCtx* dctx,
 
                 RETURN_ERROR_IF(litSize > 0 && dst == NULL, dstSize_tooSmall, "NULL not handled");
                 RETURN_ERROR_IF(expectedWriteSize < litSize, dstSize_tooSmall, "");
-                if (streaming == not_streaming && dstCapacity > ZSTD_BLOCKSIZE_MAX + 2 * WILDCOPY_OVERLENGTH)
-                {
-                    /* room for litbuffer to fit without being stomped by output or read faulting */
-                    dctx->litBuffer = (BYTE*)dst + ZSTD_BLOCKSIZE_MAX + WILDCOPY_OVERLENGTH - litSize;
-                    dctx->litBufferEnd = dctx->litBuffer + litSize;
-                    dctx->litLocation = ZSTD_lit_in_dst;
-                }
-                else if (litSize > ZSTD_LITBUFFEREXTRASIZE)
-                {
-                    /* won't fit in litExtraBuffer, so it will be split between end of dst and extra buffer */
-                    /* unlike the huffman case, literals will be directly copied to separate buffers */
-                    dctx->litBuffer = (BYTE*)dst + expectedWriteSize - litSize + ZSTD_LITBUFFEREXTRASIZE - WILDCOPY_OVERLENGTH;
-                    dctx->litBufferEnd = dctx->litBuffer + litSize - ZSTD_LITBUFFEREXTRASIZE;
-                    dctx->litLocation = ZSTD_lit_is_split;
-                }
-                else
-                {
-                    /* fits entirely within litExtraBuffer, so no split is necessary */
-                    dctx->litBuffer = dctx->litExtraBuffer;
-                    dctx->litBufferEnd = dctx->litBuffer + litSize;
-                    dctx->litLocation = ZSTD_lit_safe;
-                }
+                ZSTD_allocateLiteralsBuffer(streaming, dst, dstCapacity, litSize, dctx, expectedWriteSize, 1);
                 if (lhSize+litSize+WILDCOPY_OVERLENGTH > srcSize) {  /* risk reading beyond src buffer with wildcopy */
                     RETURN_ERROR_IF(litSize+lhSize > srcSize, corruption_detected, "");
                     if (dctx->litLocation == ZSTD_lit_is_split)
@@ -300,31 +295,17 @@ size_t ZSTD_decodeLiteralsBlock(ZSTD_DCtx* dctx,
                 RETURN_ERROR_IF(litSize > 0 && dst == NULL, dstSize_tooSmall, "NULL not handled");
                 RETURN_ERROR_IF(litSize > ZSTD_BLOCKSIZE_MAX, corruption_detected, "");
                 RETURN_ERROR_IF(expectedWriteSize < litSize, dstSize_tooSmall, "");
-                if (streaming == not_streaming && dstCapacity > ZSTD_BLOCKSIZE_MAX + 2 * WILDCOPY_OVERLENGTH)
+                ZSTD_allocateLiteralsBuffer(streaming, dst, dstCapacity, litSize, dctx, expectedWriteSize, 1);
+                if (dctx->litLocation == ZSTD_lit_is_split)
                 {
-                    /* room for litbuffer to fit without being stomped by output or read faulting */
-                    dctx->litBuffer = (BYTE*)dst + ZSTD_BLOCKSIZE_MAX + WILDCOPY_OVERLENGTH - litSize;
-                    dctx->litBufferEnd = dctx->litBuffer + litSize;
-                    ZSTD_memset(dctx->litBuffer, istart[lhSize], litSize);
-                    dctx->litLocation = ZSTD_lit_in_dst;
-                }
-                else if (litSize > ZSTD_LITBUFFEREXTRASIZE)
-                {
-                    /* won't fit in litExtraBuffer, so it will be split between end of dst and extra buffer */
-                    dctx->litBuffer = (BYTE*)dst + expectedWriteSize - litSize + ZSTD_LITBUFFEREXTRASIZE - WILDCOPY_OVERLENGTH;
-                    dctx->litBufferEnd = (BYTE*)dst + expectedWriteSize - WILDCOPY_OVERLENGTH;
                     ZSTD_memset(dctx->litBuffer, istart[lhSize], litSize - ZSTD_LITBUFFEREXTRASIZE);
                     ZSTD_memset(dctx->litExtraBuffer, istart[lhSize], ZSTD_LITBUFFEREXTRASIZE);
-                    dctx->litLocation = ZSTD_lit_is_split;
                 }
                 else
                 {
-                    /* fits entirely within litExtraBuffer, so no split is necessary */
-                    dctx->litBuffer = dctx->litExtraBuffer;
-                    dctx->litBufferEnd = dctx->litBuffer + litSize;
                     ZSTD_memset(dctx->litBuffer, istart[lhSize], litSize);
-                    dctx->litLocation = ZSTD_lit_safe;
                 }
+
                 dctx->litPtr = dctx->litBuffer;
                 dctx->litSize = litSize;
                 return lhSize+1;
@@ -874,6 +855,28 @@ static void ZSTD_safecopyDstBeforeSrc(BYTE* op, BYTE const* ip, ptrdiff_t length
     while (op < oend) *op++ = *ip++;
 }
 
+/* If the literal buffer is currently split between dst and litExtraBuffer, copy the remainder within dst to op
+ * and update litPtr to point into the litExtraBuffer */
+static size_t
+ZSTD_transitionSplitLitBuffer(ZSTD_litLocation_e* litLocation, BYTE* litExtraBuffer, const BYTE** litPtr, const BYTE* litEnd, BYTE** op, BYTE* const oend)
+{
+    if (*litLocation == ZSTD_lit_is_split)
+    {
+        size_t const lastLLSize = litEnd - *litPtr;
+        RETURN_ERROR_IF(lastLLSize > (size_t)(oend - *op), dstSize_tooSmall, "");
+        if (lastLLSize > 0 && *op != NULL) {
+            ZSTD_memmove(*op, *litPtr, lastLLSize);
+            *op += lastLLSize;
+        }
+
+        *litPtr = litExtraBuffer;
+        *litLocation = ZSTD_lit_is_unsplit;
+        return lastLLSize;
+    }
+
+    return 0;
+}
+
 /* ZSTD_execSequenceEnd():
  * This version handles cases that are near the end of the output buffer or beginning of lit buffer. It requires
  * more careful checks to make sure there is no overflow. By separating out these hard
@@ -895,15 +898,9 @@ size_t ZSTD_execSequenceEnd(BYTE* op,
 
     /* literals are split between dst and litExtraBuffer, copy the remainder from dst and then resume */
     if (*litLocation == ZSTD_lit_is_split && *litPtr + sequence.litLength > litLimit) {
-        const size_t leftoverLit = litLimit - *litPtr;
-        if (leftoverLit) {
-            RETURN_ERROR_IF(leftoverLit > (size_t)(oend - op), dstSize_tooSmall, "remaining lit must fit within dstBuffer");
-            ZSTD_safecopyDstBeforeSrc(op, *litPtr, leftoverLit);
-            sequence.litLength -= leftoverLit;
-            op += leftoverLit;
-        }
-        *litPtr = litExtraBuffer;
-        *litLocation = ZSTD_lit_is_unsplit;
+        size_t res = ZSTD_transitionSplitLitBuffer(litLocation, litExtraBuffer, litPtr, litLimit, &op, oend);
+        if (ZSTD_isError(res)) return res;
+        sequence.litLength -= res;
     }
 
     /* bounds checks : careful of address space overflow in 32-bit mode */
@@ -1290,18 +1287,10 @@ ZSTD_decompressSequences_body(ZSTD_DCtx* dctx,
     }
 
     /* last literal segment */
-    if (dctx->litLocation == ZSTD_lit_is_split)  /* split hasn't been reached yet, first get dst then copy litExtraBuffer */
     {
-        size_t const lastLLSize = litEnd - litPtr;
-        RETURN_ERROR_IF(lastLLSize > (size_t)(oend - op), dstSize_tooSmall, "");
-        if (op != NULL) {
-            ZSTD_memmove(op, litPtr, lastLLSize);
-            op += lastLLSize;
-        }
-        litPtr = dctx->litExtraBuffer;
-        dctx->litLocation = ZSTD_lit_is_unsplit;
+        size_t res = ZSTD_transitionSplitLitBuffer(&dctx->litLocation, dctx->litExtraBuffer, &litPtr, litEnd, &op, oend);
+        if (ZSTD_isError(res)) return res;
     }
-
     {   size_t const lastLLSize = (dctx->litLocation == ZSTD_lit_is_unsplit ? dctx->litExtraBuffer + ZSTD_LITBUFFEREXTRASIZE : litEnd) - litPtr;
         RETURN_ERROR_IF(lastLLSize > (size_t)(oend-op), dstSize_tooSmall, "");
         if (op != NULL) {
@@ -1427,17 +1416,9 @@ ZSTD_decompressSequencesLong_body(
     }
 
     /* last literal segment */
-    if (dctx->litLocation == ZSTD_lit_is_split)  /* first deplete literal buffer in dst, then copy litExtraBuffer */
     {
-        size_t const lastLLSize = litEnd - litPtr;
-        RETURN_ERROR_IF(lastLLSize > (size_t)(oend - op), dstSize_tooSmall, "");
-        if (op != NULL) {
-            ZSTD_memmove(op, litPtr, lastLLSize);
-            op += lastLLSize;
-        }
-
-        litPtr = dctx->litExtraBuffer;
-        dctx->litLocation = ZSTD_lit_is_unsplit;
+        size_t res = ZSTD_transitionSplitLitBuffer(&dctx->litLocation, dctx->litExtraBuffer, &litPtr, litEnd, &op, oend);
+        if (ZSTD_isError(res)) return res;
     }
     {   size_t const lastLLSize = (dctx->litLocation == ZSTD_lit_is_unsplit ? dctx->litExtraBuffer + ZSTD_LITBUFFEREXTRASIZE : litEnd) - litPtr;
         RETURN_ERROR_IF(lastLLSize > (size_t)(oend-op), dstSize_tooSmall, "");
