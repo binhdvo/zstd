@@ -111,7 +111,8 @@ typedef struct {
 typedef enum {
     ZSTD_lit_safe = 0,
     ZSTD_lit_in_dst = 1,
-    ZSTD_lit_is_split = 2
+    ZSTD_lit_is_split = 2,
+    ZSTD_lit_is_unsplit = 3        /* was split but has transitioned past the split point */
 } ZSTD_litLocation_e;
 
 struct ZSTD_DCtx_s
