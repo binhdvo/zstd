@@ -951,7 +951,6 @@ size_t ZSTD_execSequence(BYTE* op,
 
     assert(op != NULL /* Precondition */);
     assert(oend_w < oend /* No underflow */);
-    RETURN_ERROR_IF(UNLIKELY(*litPtr - op < WILDCOPY_OVERLENGTH && *litLocation != ZSTD_lit_safe && *litLocation != ZSTD_lit_is_unsplit), dstSize_tooSmall, "");  /* op should not catch up to litPtr unless dst was underallocated */
     /* Handle edge cases in a slow path:
      *   - Read beyond end of literals
      *   - Match end is within WILDCOPY_OVERLIMIT of oend
