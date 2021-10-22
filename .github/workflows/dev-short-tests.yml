@@ -163,6 +163,7 @@ jobs:
           CC=clang MOREFLAGS="-Werror -Wimplicit-fallthrough -O0" make -C lib -j libzstd.a ZSTD_LEGACY_SUPPORT=0
 
 
+
   visual-2019:
     runs-on: windows-latest
     strategy:
