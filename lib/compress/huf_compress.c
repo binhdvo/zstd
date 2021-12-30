@@ -44,9 +44,50 @@
 /* **************************************************************
 *  Utils
 ****************************************************************/
-unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, unsigned maxSymbolValue)
+size_t HUF_getCTableSize(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog);
+
+#define IMPROVEMENT_THRESHOLD 5 /* estimation can be off by 4 bytes, only shift if we're sure we're winning */
+#define ESTIMATE_SIZE(c, result) CHECK_F(HUF_buildCTable(ct, count, maxSymbolValue, c)); \
+    result = HUF_estimateCompressedSize(ct, count, maxSymbolValue) + HUF_getCTableSize(ct, maxSymbolValue, c);
+unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigned* count, unsigned maxSymbolValue)
 {
-    return FSE_optimalTableLog_internal(maxTableLog, srcSize, maxSymbolValue, 1);
+    U32 maxBits = BIT_highbit32((U32)(srcSize - 1)) - 1;
+    U32 minBits = FSE_minTableLog(srcSize, maxSymbolValue);
+    U32 tableLog = maxTableLog;
+    size_t estimatedSize = 0;
+    size_t proposedSize = 0;
+    HUF_CElt ct[HUF_SYMBOLVALUE_MAX+1];
+    unsigned movedUp = 0;
+
+    /* initial bounds */
+    if (maxBits > HUF_TABLELOG_MAX) maxBits = HUF_TABLELOG_MAX;
+    if (tableLog == 0) tableLog = HUF_TABLELOG_DEFAULT;
+    if (tableLog > maxBits) tableLog = maxBits;
+    if (tableLog < minBits) tableLog = minBits;
+
+
+    /* base size estimation */
+    ESTIMATE_SIZE(tableLog, estimatedSize);
+
+    /* incrementally check neighboring depths */
+    for (; tableLog < maxBits; tableLog++) {
+        ESTIMATE_SIZE(tableLog + 1, proposedSize);
+        if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
+            break;
+        estimatedSize = proposedSize;
+        movedUp = 1;
+    }
+    if (movedUp)  // no point in scanning back down since we just came from that value
+        return tableLog;
+
+    for (; tableLog > minBits; tableLog--) {
+        ESTIMATE_SIZE(tableLog, proposedSize);
+        if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
+            break;
+        estimatedSize = proposedSize;
+    }
+
+    return tableLog;
 }
 
 
@@ -88,6 +129,34 @@ typedef struct {
     unsigned count[HUF_TABLELOG_MAX+1];
     S16 norm[HUF_TABLELOG_MAX+1];
 } HUF_CompressWeightsWksp;
+
+static size_t HUF_getWeightsSize(const void* weightTable, size_t wtSize, void* workspace, size_t workspaceSize)
+{
+    unsigned maxSymbolValue = HUF_TABLELOG_MAX;
+    U32 tableLog = MAX_FSE_TABLELOG_FOR_HUFF_HEADER;
+    size_t result = 0;
+    HUF_CompressWeightsWksp* wksp = (HUF_CompressWeightsWksp*)HUF_alignUpWorkspace(workspace, &workspaceSize, ZSTD_ALIGNOF(U32));
+
+    if (workspaceSize < sizeof(HUF_CompressWeightsWksp)) return ERROR(GENERIC);
+
+    /* init conditions */
+    if (wtSize <= 1) return 0;  /* Not compressible */
+
+    /* Scan input and build symbol stats */
+    {   unsigned const maxCount = HIST_count_simple(wksp->count, &maxSymbolValue, weightTable, wtSize);   /* never fails */
+    if (maxCount == wtSize) return 1;   /* only a single symbol in src : rle */
+    if (maxCount == 1) return 0;        /* each symbol present maximum once => not compressible */
+    }
+
+    tableLog = FSE_optimalTableLog(tableLog, wtSize, maxSymbolValue);
+    CHECK_F(FSE_normalizeCount(wksp->norm, tableLog, wksp->count, wtSize, maxSymbolValue, /* useLowProbCount */ 0));
+    CHECK_F(FSE_buildCTable_wksp(wksp->CTable, wksp->norm, maxSymbolValue, tableLog, wksp->scratchBuffer, sizeof(wksp->scratchBuffer)));
+    /* table header estimation can be improved */
+    result += FSE_estimateNCountSize(wksp->norm, maxSymbolValue, tableLog) + FSE_estimateCompressedSize(wksp->CTable, wksp->count, maxSymbolValue, tableLog);
+
+    return result;
+}
+
 
 static size_t HUF_compressWeights(void* dst, size_t dstSize, const void* weightTable, size_t wtSize, void* workspace, size_t workspaceSize)
 {
@@ -169,6 +238,34 @@ typedef struct {
     BYTE huffWeight[HUF_SYMBOLVALUE_MAX];
 } HUF_WriteCTableWksp;
 
+size_t HUF_getCTableSize_wksp(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog,
+    void* workspace, size_t workspaceSize)
+{
+    HUF_CElt const* const ct = CTable + 1;
+    U32 n;
+    HUF_WriteCTableWksp* wksp = (HUF_WriteCTableWksp*)HUF_alignUpWorkspace(workspace, &workspaceSize, ZSTD_ALIGNOF(U32));
+
+    /* check conditions */
+    if (workspaceSize < sizeof(HUF_WriteCTableWksp)) return ERROR(GENERIC);
+    if (maxSymbolValue > HUF_SYMBOLVALUE_MAX) return ERROR(maxSymbolValue_tooLarge);
+
+    /* convert to weight */
+    wksp->bitsToWeight[0] = 0;
+    for (n = 1; n < huffLog + 1; n++)
+        wksp->bitsToWeight[n] = (BYTE)(huffLog + 1 - n);
+    for (n = 0; n < maxSymbolValue; n++)
+        wksp->huffWeight[n] = wksp->bitsToWeight[HUF_getNbBits(ct[n])];
+
+    /* check weights compression by FSE */
+    {size_t hSize = HUF_getWeightsSize(wksp->huffWeight, maxSymbolValue, &wksp->wksp, sizeof(wksp->wksp));
+    if ((hSize > 1) & (hSize < maxSymbolValue / 2)) {   /* FSE compressed */
+        return hSize + 1;
+    }   }
+
+    /* size based on writing raw values as 4-bits (max : 15) */
+    return ((maxSymbolValue + 1) / 2) + 1;
+}
+
 size_t HUF_writeCTable_wksp(void* dst, size_t maxDstSize,
                             const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog,
                             void* workspace, size_t workspaceSize)
@@ -205,6 +302,15 @@ size_t HUF_writeCTable_wksp(void* dst, size_t maxDstSize,
     for (n=0; n<maxSymbolValue; n+=2)
         op[(n/2)+1] = (BYTE)((wksp->huffWeight[n] << 4) + wksp->huffWeight[n+1]);
     return ((maxSymbolValue+1)/2) + 1;
+}
+
+/*! HUF_getCTableSize() :
+    `CTable` : Huffman tree to size, using huf representation.
+    @return : size of CTable */
+size_t HUF_getCTableSize(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog)
+{
+    HUF_WriteCTableWksp wksp;
+    return HUF_getCTableSize_wksp(CTable, maxSymbolValue, huffLog, &wksp, sizeof(wksp));
 }
 
 /*! HUF_writeCTable() :
@@ -1242,7 +1348,7 @@ HUF_compress_internal (void* dst, size_t dstSize,
     }
 
     /* Build Huffman Tree */
-    huffLog = HUF_optimalTableLog(huffLog, srcSize, maxSymbolValue);
+    huffLog = HUF_optimalTableLog(huffLog, srcSize, table->count, maxSymbolValue);
     {   size_t const maxBits = HUF_buildCTable_wksp(table->CTable, table->count,
                                             maxSymbolValue, huffLog,
                                             &table->wksps.buildCTable_wksp, sizeof(table->wksps.buildCTable_wksp));

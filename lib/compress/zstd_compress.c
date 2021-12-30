@@ -3113,7 +3113,7 @@ static size_t ZSTD_buildBlockEntropyStats_literals(void* const src, size_t srcSi
 
     /* Build Huffman Tree */
     ZSTD_memset(nextHuf->CTable, 0, sizeof(nextHuf->CTable));
-    huffLog = HUF_optimalTableLog(huffLog, srcSize, maxSymbolValue);
+    huffLog = HUF_optimalTableLog(huffLog, srcSize, countWksp, maxSymbolValue);
     {   size_t const maxBits = HUF_buildCTable_wksp((HUF_CElt*)nextHuf->CTable, countWksp,
                                                     maxSymbolValue, huffLog,
                                                     nodeWksp, nodeWkspSize);
