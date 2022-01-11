@@ -44,7 +44,6 @@
 /* **************************************************************
 *  Utils
 ****************************************************************/
-size_t HUF_getCTableSize(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog);
 
 #define IMPROVEMENT_THRESHOLD 5 /* estimation can be off by 4 bytes, only shift if we're sure we're winning */
 #define ESTIMATE_SIZE(c, result) CHECK_F(HUF_buildCTable(ct, count, maxSymbolValue, c)); \
