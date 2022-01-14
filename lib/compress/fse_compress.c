@@ -658,11 +658,11 @@ size_t FSE_estimateCompressedSize(const FSE_CTable* ct, const unsigned* count, u
     const FSE_symbolCompressionTransform* const symbolTT = (const FSE_symbolCompressionTransform*)(FSCT);
 
     size_t nbBits = 0;
-    int s;
-    for (s = 0; s <= (int)maxSymbolValue; ++s) {
-        nbBits += symbolTT[s].deltaNbBits * count[s];
+    U32 s;
+    for (s = 0; s <= maxSymbolValue; ++s) {
+        nbBits += FSE_bitCost(symbolTT, tableLog, s, 8 /* accuracyLog */) * count[s];
     }
-    return nbBits >> 3;
+    return nbBits >> (8 + 3);  /* accuracyLog + bit->byte */
 }
 
 

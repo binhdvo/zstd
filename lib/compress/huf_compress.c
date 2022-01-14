@@ -46,7 +46,7 @@
 ****************************************************************/
 
 #define IMPROVEMENT_THRESHOLD 5 /* estimation can be off by 4 bytes, only shift if we're sure we're winning */
-#define ESTIMATE_SIZE(c, result) CHECK_F(HUF_buildCTable(ct, count, maxSymbolValue, c)); \
+#define ESTIMATE_SIZE(c, result) HUF_buildCTable(ct, count, maxSymbolValue, c); \
     result = HUF_estimateCompressedSize(ct, count, maxSymbolValue) + HUF_getCTableSize(ct, maxSymbolValue, c);
 unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigned* count, unsigned maxSymbolValue)
 {
@@ -55,7 +55,7 @@ unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigne
     U32 tableLog = maxTableLog;
     size_t estimatedSize = 0;
     size_t proposedSize = 0;
-    HUF_CElt ct[HUF_SYMBOLVALUE_MAX+1];
+    HUF_CElt ct[HUF_CTABLE_SIZE(HUF_SYMBOLVALUE_MAX)];
     unsigned movedUp = 0;
 
     /* initial bounds */
@@ -150,7 +150,6 @@ static size_t HUF_getWeightsSize(const void* weightTable, size_t wtSize, void* w
     tableLog = FSE_optimalTableLog(tableLog, wtSize, maxSymbolValue);
     CHECK_F(FSE_normalizeCount(wksp->norm, tableLog, wksp->count, wtSize, maxSymbolValue, /* useLowProbCount */ 0));
     CHECK_F(FSE_buildCTable_wksp(wksp->CTable, wksp->norm, maxSymbolValue, tableLog, wksp->scratchBuffer, sizeof(wksp->scratchBuffer)));
-    /* table header estimation can be improved */
     result += FSE_estimateNCountSize(wksp->norm, maxSymbolValue, tableLog) + FSE_estimateCompressedSize(wksp->CTable, wksp->count, maxSymbolValue, tableLog);
 
     return result;
@@ -1441,17 +1440,17 @@ size_t HUF_compress4X_repeat (void* dst, size_t dstSize,
                                  hufTable, repeat, preferRepeat, bmi2, suspectUncompressible);
 }
 
-#ifndef ZSTD_NO_UNUSED_FUNCTIONS
 /** HUF_buildCTable() :
  * @return : maxNbBits
  *  Note : count is used before tree is written, so they can safely overlap
  */
-size_t HUF_buildCTable (HUF_CElt* tree, const unsigned* count, unsigned maxSymbolValue, unsigned maxNbBits)
+size_t HUF_buildCTable(HUF_CElt* tree, const unsigned* count, unsigned maxSymbolValue, unsigned maxNbBits)
 {
     HUF_buildCTable_wksp_tables workspace;
     return HUF_buildCTable_wksp(tree, count, maxSymbolValue, maxNbBits, &workspace, sizeof(workspace));
 }
 
+#ifndef ZSTD_NO_UNUSED_FUNCTIONS
 size_t HUF_compress1X (void* dst, size_t dstSize,
                  const void* src, size_t srcSize,
                  unsigned maxSymbolValue, unsigned huffLog)
