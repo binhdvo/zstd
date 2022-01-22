@@ -79,7 +79,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *src, size_t size)
     void* rBuf = FUZZ_malloc(size);
     void* cBuf = FUZZ_malloc(cBufSize);
     HUF_CElt* ct = (HUF_CElt*)FUZZ_malloc(HUF_CTABLE_SIZE(maxSymbol));
-    tableLog = HUF_optimalTableLog(tableLog, size, count, maxSymbol);
+    tableLog = HUF_optimalTableLog(tableLog, size, count, maxSymbol, HUF_seek_neighbors);
     FUZZ_ASSERT(tableLog <= 12);
     tableLog = HUF_buildCTable_wksp(ct, count, maxSymbol, tableLog, wksp, wkspSize);
     FUZZ_ZASSERT(tableLog);

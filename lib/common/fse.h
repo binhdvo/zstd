@@ -186,7 +186,7 @@ FSE_PUBLIC_API size_t FSE_buildCTable(FSE_CTable* ct, const short* normalizedCou
 FSE_PUBLIC_API size_t FSE_compress_usingCTable (void* dst, size_t dstCapacity, const void* src, size_t srcSize, const FSE_CTable* ct);
 
 /*! FSE_estimateCompressedSize():
-    Estimate compressed size of data.
+    Estimate compressed size of data based on sum of fractional bit counts, will be >= actual cost.
     @return : estimated size of compressed data */
 FSE_PUBLIC_API size_t FSE_estimateCompressedSize (const FSE_CTable* ct, const unsigned* count, unsigned maxSymbolValue, unsigned tableLog);
 

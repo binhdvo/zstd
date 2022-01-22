@@ -339,7 +339,6 @@ size_t FSE_writeNCount (void* buffer, size_t bufferSize,
 
 size_t FSE_estimateNCountSize(const short* normalizedCounter, unsigned maxSymbolValue, unsigned tableLog)
 {
-    size_t result = 0;
     int nbBits;
     const int tableSize = 1 << tableLog;
     int remaining;
@@ -362,19 +361,8 @@ size_t FSE_estimateNCountSize(const short* normalizedCounter, unsigned maxSymbol
             unsigned start = symbol;
             while ((symbol < alphabetSize) && !normalizedCounter[symbol]) symbol++;
             if (symbol == alphabetSize) break;   /* incorrect distribution */
-            while (symbol >= start + 24) {
-                start += 24;
-                result += 2;
-            }
-            while (symbol >= start + 3) {
-                start += 3;
-                bitCount += 2;
-            }
-            bitCount += 2;
-            if (bitCount > 16) {
-                result += 2;
-                bitCount -= 16;
-            }
+            bitCount += ((symbol - start) / 24) * 16;
+            bitCount += (((symbol - start) % 24 + 2) / 3) * 2;
         }
         {   int count = normalizedCounter[symbol++];
             int const max = (2 * threshold - 1) - remaining;
@@ -387,16 +375,9 @@ size_t FSE_estimateNCountSize(const short* normalizedCounter, unsigned maxSymbol
             previousIs0 = (count == 1);
             while (remaining < threshold) { nbBits--; threshold >>= 1; }
         }
-        if (bitCount > 16) {
-            result += 2;
-            bitCount -= 16;
-        }
     }
 
-    /* flush remaining bitStream */
-    result += (bitCount + 7) / 8;
-
-    return result;
+    return (bitCount + 7) / 8;
 }
 
 /*-**************************************************************

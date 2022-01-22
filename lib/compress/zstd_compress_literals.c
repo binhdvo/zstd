@@ -67,6 +67,7 @@ size_t ZSTD_compressRleLiteralsBlock (void* dst, size_t dstCapacity, const void*
     return flSize+1;
 }
 
+#define HUF_DEPTH_STRATEGY_CUTOFF ZSTD_btopt
 size_t ZSTD_compressLiterals (ZSTD_hufCTables_t const* prevHuf,
                               ZSTD_hufCTables_t* nextHuf,
                               ZSTD_strategy strategy, int disableLiteralCompression,
@@ -106,11 +107,13 @@ size_t ZSTD_compressLiterals (ZSTD_hufCTables_t const* prevHuf,
             HUF_compress1X_repeat(
                 ostart+lhSize, dstCapacity-lhSize, src, srcSize,
                 HUF_SYMBOLVALUE_MAX, HUF_TABLELOG_DEFAULT, entropyWorkspace, entropyWorkspaceSize,
-                (HUF_CElt*)nextHuf->CTable, &repeat, preferRepeat, bmi2, suspectUncompressible) :
+                (HUF_CElt*)nextHuf->CTable, &repeat, preferRepeat, bmi2, suspectUncompressible,
+                strategy >= HUF_DEPTH_STRATEGY_CUTOFF ? HUF_seek_neighbors : HUF_default) :
             HUF_compress4X_repeat(
                 ostart+lhSize, dstCapacity-lhSize, src, srcSize,
                 HUF_SYMBOLVALUE_MAX, HUF_TABLELOG_DEFAULT, entropyWorkspace, entropyWorkspaceSize,
-                (HUF_CElt*)nextHuf->CTable, &repeat, preferRepeat, bmi2, suspectUncompressible);
+                (HUF_CElt*)nextHuf->CTable, &repeat, preferRepeat, bmi2, suspectUncompressible,
+                strategy >= HUF_DEPTH_STRATEGY_CUTOFF ? HUF_seek_neighbors : HUF_default);
         if (repeat != HUF_repeat_none) {
             /* reused the existing table */
             DEBUGLOG(5, "Reusing previous huffman table");

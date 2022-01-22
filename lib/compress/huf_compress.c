@@ -41,55 +41,6 @@
 #define HUF_STATIC_ASSERT(c) DEBUG_STATIC_ASSERT(c)   /* use only *after* variable declarations */
 
 
-/* **************************************************************
-*  Utils
-****************************************************************/
-
-#define IMPROVEMENT_THRESHOLD 5 /* estimation can be off by 4 bytes, only shift if we're sure we're winning */
-#define ESTIMATE_SIZE(c, result) HUF_buildCTable(ct, count, maxSymbolValue, c); \
-    result = HUF_estimateCompressedSize(ct, count, maxSymbolValue) + HUF_getCTableSize(ct, maxSymbolValue, c);
-unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigned* count, unsigned maxSymbolValue)
-{
-    U32 maxBits = BIT_highbit32((U32)(srcSize - 1)) - 1;
-    U32 minBits = FSE_minTableLog(srcSize, maxSymbolValue);
-    U32 tableLog = maxTableLog;
-    size_t estimatedSize = 0;
-    size_t proposedSize = 0;
-    HUF_CElt ct[HUF_CTABLE_SIZE(HUF_SYMBOLVALUE_MAX)];
-    unsigned movedUp = 0;
-
-    /* initial bounds */
-    if (maxBits > HUF_TABLELOG_MAX) maxBits = HUF_TABLELOG_MAX;
-    if (tableLog == 0) tableLog = HUF_TABLELOG_DEFAULT;
-    if (tableLog > maxBits) tableLog = maxBits;
-    if (tableLog < minBits) tableLog = minBits;
-
-
-    /* base size estimation */
-    ESTIMATE_SIZE(tableLog, estimatedSize);
-
-    /* incrementally check neighboring depths */
-    for (; tableLog < maxBits; tableLog++) {
-        ESTIMATE_SIZE(tableLog + 1, proposedSize);
-        if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
-            break;
-        estimatedSize = proposedSize;
-        movedUp = 1;
-    }
-    if (movedUp)  // no point in scanning back down since we just came from that value
-        return tableLog;
-
-    for (; tableLog > minBits; tableLog--) {
-        ESTIMATE_SIZE(tableLog, proposedSize);
-        if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
-            break;
-        estimatedSize = proposedSize;
-    }
-
-    return tableLog;
-}
-
-
 /* *******************************************************
 *  HUF : Huffman block compression
 *********************************************************/
@@ -236,7 +187,7 @@ typedef struct {
     BYTE huffWeight[HUF_SYMBOLVALUE_MAX];
 } HUF_WriteCTableWksp;
 
-size_t HUF_getCTableSize_wksp(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog,
+size_t HUF_getEncodedCTableSize_wksp(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog,
     void* workspace, size_t workspaceSize)
 {
     HUF_CElt const* const ct = CTable + 1;
@@ -302,13 +253,13 @@ size_t HUF_writeCTable_wksp(void* dst, size_t maxDstSize,
     return ((maxSymbolValue+1)/2) + 1;
 }
 
-/*! HUF_getCTableSize() :
+/*! HUF_getEncodedCTableSize() :
     `CTable` : Huffman tree to size, using huf representation.
     @return : size of CTable */
-size_t HUF_getCTableSize(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog)
+size_t HUF_getEncodedCTableSize(const HUF_CElt* CTable, unsigned maxSymbolValue, unsigned huffLog)
 {
     HUF_WriteCTableWksp wksp;
-    return HUF_getCTableSize_wksp(CTable, maxSymbolValue, huffLog, &wksp, sizeof(wksp));
+    return HUF_getEncodedCTableSize_wksp(CTable, maxSymbolValue, huffLog, &wksp, sizeof(wksp));
 }
 
 /*! HUF_writeCTable() :
@@ -557,6 +508,61 @@ typedef struct {
 #define RANK_POSITION_MAX_COUNT_LOG 32
 #define RANK_POSITION_LOG_BUCKETS_BEGIN (RANK_POSITION_TABLE_SIZE - 1) - RANK_POSITION_MAX_COUNT_LOG - 1 /* == 158 */
 #define RANK_POSITION_DISTINCT_COUNT_CUTOFF RANK_POSITION_LOG_BUCKETS_BEGIN + BIT_highbit32(RANK_POSITION_LOG_BUCKETS_BEGIN) /* == 166 */
+
+ /* **************************************************************
+ *  Utils
+ ****************************************************************/
+
+#define IMPROVEMENT_THRESHOLD 5 /* estimation can be off by 4 bytes, only shift if we're sure we're winning */
+#define ESTIMATE_SIZE(c, result) HUF_buildCTable_wksp(ct, count, maxSymbolValue, c, &buildTableWorkspace, sizeof(buildTableWorkspace)); \
+    result = HUF_estimateCompressedSize(ct, count, maxSymbolValue) + HUF_getEncodedCTableSize_wksp(ct, maxSymbolValue, c, &writeTableWorkspace, sizeof(writeTableWorkspace));
+unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigned* count, unsigned maxSymbolValue, HUF_depthStrategy strategy)
+{
+    if (strategy == HUF_seek_neighbors) {
+        U32 maxBits = BIT_highbit32((U32)(srcSize - 1)) - 1;
+        U32 minBits = FSE_minTableLog(srcSize, maxSymbolValue);
+        U32 tableLog = maxTableLog;
+        size_t estimatedSize = 0;
+        size_t proposedSize = 0;
+        HUF_CElt ct[HUF_CTABLE_SIZE(HUF_SYMBOLVALUE_MAX)];
+        unsigned movedUp = 0;
+        HUF_buildCTable_wksp_tables buildTableWorkspace;
+        HUF_WriteCTableWksp writeTableWorkspace;
+
+        /* initial bounds */
+        if (maxBits > HUF_TABLELOG_MAX) maxBits = HUF_TABLELOG_MAX;
+        if (tableLog == 0) tableLog = HUF_TABLELOG_DEFAULT;
+        if (tableLog > maxBits) tableLog = maxBits;
+        if (tableLog < minBits) tableLog = minBits;
+
+
+        /* base size estimation */
+        ESTIMATE_SIZE(tableLog, estimatedSize);
+
+        /* incrementally check neighboring depths */
+        for (; tableLog < maxBits; tableLog++) {
+            ESTIMATE_SIZE(tableLog + 1, proposedSize);
+            if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
+                break;
+            estimatedSize = proposedSize;
+            movedUp = 1;
+        }
+        if (movedUp)  // no point in scanning back down since we just came from that value
+            return tableLog;
+
+        for (; tableLog > minBits; tableLog--) {
+            ESTIMATE_SIZE(tableLog, proposedSize);
+            if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
+                break;
+            estimatedSize = proposedSize;
+        }
+
+        return tableLog;
+    }
+    else {
+        return FSE_optimalTableLog_internal(maxTableLog, srcSize, maxSymbolValue, 1);
+    }
+}
 
 /* Return the appropriate bucket index for a given count. See definition of
  * RANK_POSITION_DISTINCT_COUNT_CUTOFF for explanation of bucketing strategy.
@@ -1285,7 +1291,7 @@ HUF_compress_internal (void* dst, size_t dstSize,
                        HUF_nbStreams_e nbStreams,
                        void* workSpace, size_t wkspSize,
                        HUF_CElt* oldHufTable, HUF_repeat* repeat, int preferRepeat,
-                 const int bmi2, unsigned suspectUncompressible)
+                 const int bmi2, unsigned suspectUncompressible, HUF_depthStrategy depthStrategy)
 {
     HUF_compress_tables_t* const table = (HUF_compress_tables_t*)HUF_alignUpWorkspace(workSpace, &wkspSize, ZSTD_ALIGNOF(size_t));
     BYTE* const ostart = (BYTE*)dst;
@@ -1346,7 +1352,7 @@ HUF_compress_internal (void* dst, size_t dstSize,
     }
 
     /* Build Huffman Tree */
-    huffLog = HUF_optimalTableLog(huffLog, srcSize, table->count, maxSymbolValue);
+    huffLog = HUF_optimalTableLog(huffLog, srcSize, table->count, maxSymbolValue, depthStrategy);
     {   size_t const maxBits = HUF_buildCTable_wksp(table->CTable, table->count,
                                             maxSymbolValue, huffLog,
                                             &table->wksps.buildCTable_wksp, sizeof(table->wksps.buildCTable_wksp));
@@ -1389,12 +1395,12 @@ HUF_compress_internal (void* dst, size_t dstSize,
 size_t HUF_compress1X_wksp (void* dst, size_t dstSize,
                       const void* src, size_t srcSize,
                       unsigned maxSymbolValue, unsigned huffLog,
-                      void* workSpace, size_t wkspSize)
+                      void* workSpace, size_t wkspSize, HUF_depthStrategy depthStrategy)
 {
     return HUF_compress_internal(dst, dstSize, src, srcSize,
                                  maxSymbolValue, huffLog, HUF_singleStream,
                                  workSpace, wkspSize,
-                                 NULL, NULL, 0, 0 /*bmi2*/, 0);
+                                 NULL, NULL, 0, 0 /*bmi2*/, 0, depthStrategy);
 }
 
 size_t HUF_compress1X_repeat (void* dst, size_t dstSize,
@@ -1402,12 +1408,12 @@ size_t HUF_compress1X_repeat (void* dst, size_t dstSize,
                       unsigned maxSymbolValue, unsigned huffLog,
                       void* workSpace, size_t wkspSize,
                       HUF_CElt* hufTable, HUF_repeat* repeat, int preferRepeat,
-                      int bmi2, unsigned suspectUncompressible)
+                      int bmi2, unsigned suspectUncompressible, HUF_depthStrategy depthStrategy)
 {
     return HUF_compress_internal(dst, dstSize, src, srcSize,
                                  maxSymbolValue, huffLog, HUF_singleStream,
                                  workSpace, wkspSize, hufTable,
-                                 repeat, preferRepeat, bmi2, suspectUncompressible);
+                                 repeat, preferRepeat, bmi2, suspectUncompressible, depthStrategy);
 }
 
 /* HUF_compress4X_repeat():
@@ -1416,12 +1422,12 @@ size_t HUF_compress1X_repeat (void* dst, size_t dstSize,
 size_t HUF_compress4X_wksp (void* dst, size_t dstSize,
                       const void* src, size_t srcSize,
                       unsigned maxSymbolValue, unsigned huffLog,
-                      void* workSpace, size_t wkspSize)
+                      void* workSpace, size_t wkspSize, HUF_depthStrategy depthStrategy)
 {
     return HUF_compress_internal(dst, dstSize, src, srcSize,
                                  maxSymbolValue, huffLog, HUF_fourStreams,
                                  workSpace, wkspSize,
-                                 NULL, NULL, 0, 0 /*bmi2*/, 0);
+                                 NULL, NULL, 0, 0 /*bmi2*/, 0, depthStrategy);
 }
 
 /* HUF_compress4X_repeat():
@@ -1432,12 +1438,12 @@ size_t HUF_compress4X_repeat (void* dst, size_t dstSize,
                       const void* src, size_t srcSize,
                       unsigned maxSymbolValue, unsigned huffLog,
                       void* workSpace, size_t wkspSize,
-                      HUF_CElt* hufTable, HUF_repeat* repeat, int preferRepeat, int bmi2, unsigned suspectUncompressible)
+                      HUF_CElt* hufTable, HUF_repeat* repeat, int preferRepeat, int bmi2, unsigned suspectUncompressible, HUF_depthStrategy depthStrategy)
 {
     return HUF_compress_internal(dst, dstSize, src, srcSize,
                                  maxSymbolValue, huffLog, HUF_fourStreams,
                                  workSpace, wkspSize,
-                                 hufTable, repeat, preferRepeat, bmi2, suspectUncompressible);
+                                 hufTable, repeat, preferRepeat, bmi2, suspectUncompressible, depthStrategy);
 }
 
 /** HUF_buildCTable() :
@@ -1453,22 +1459,22 @@ size_t HUF_buildCTable(HUF_CElt* tree, const unsigned* count, unsigned maxSymbol
 #ifndef ZSTD_NO_UNUSED_FUNCTIONS
 size_t HUF_compress1X (void* dst, size_t dstSize,
                  const void* src, size_t srcSize,
-                 unsigned maxSymbolValue, unsigned huffLog)
+                 unsigned maxSymbolValue, unsigned huffLog, HUF_depthStrategy depthStrategy)
 {
     U64 workSpace[HUF_WORKSPACE_SIZE_U64];
-    return HUF_compress1X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, workSpace, sizeof(workSpace));
+    return HUF_compress1X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, workSpace, sizeof(workSpace), depthStrategy);
 }
 
 size_t HUF_compress2 (void* dst, size_t dstSize,
                 const void* src, size_t srcSize,
-                unsigned maxSymbolValue, unsigned huffLog)
+                unsigned maxSymbolValue, unsigned huffLog, HUF_depthStrategy depthStrategy)
 {
     U64 workSpace[HUF_WORKSPACE_SIZE_U64];
-    return HUF_compress4X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, workSpace, sizeof(workSpace));
+    return HUF_compress4X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, workSpace, sizeof(workSpace), depthStrategy);
 }
 
-size_t HUF_compress (void* dst, size_t maxDstSize, const void* src, size_t srcSize)
+size_t HUF_compress (void* dst, size_t maxDstSize, const void* src, size_t srcSize, HUF_depthStrategy depthStrategy)
 {
-    return HUF_compress2(dst, maxDstSize, src, srcSize, 255, HUF_TABLELOG_DEFAULT);
+    return HUF_compress2(dst, maxDstSize, src, srcSize, 255, HUF_TABLELOG_DEFAULT, depthStrategy);
 }
 #endif
