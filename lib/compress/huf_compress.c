@@ -1395,7 +1395,7 @@ HUF_compress_internal (void* dst, size_t dstSize,
 size_t HUF_compress1X_wksp (void* dst, size_t dstSize,
                       const void* src, size_t srcSize,
                       unsigned maxSymbolValue, unsigned huffLog,
-                      void* workSpace, size_t wkspSize, HUF_depthStrategy depthStrategy)
+                      HUF_depthStrategy depthStrategy, void* workSpace, size_t wkspSize)
 {
     return HUF_compress_internal(dst, dstSize, src, srcSize,
                                  maxSymbolValue, huffLog, HUF_singleStream,
@@ -1422,7 +1422,7 @@ size_t HUF_compress1X_repeat (void* dst, size_t dstSize,
 size_t HUF_compress4X_wksp (void* dst, size_t dstSize,
                       const void* src, size_t srcSize,
                       unsigned maxSymbolValue, unsigned huffLog,
-                      void* workSpace, size_t wkspSize, HUF_depthStrategy depthStrategy)
+                      HUF_depthStrategy depthStrategy, void* workSpace, size_t wkspSize)
 {
     return HUF_compress_internal(dst, dstSize, src, srcSize,
                                  maxSymbolValue, huffLog, HUF_fourStreams,
@@ -1462,7 +1462,7 @@ size_t HUF_compress1X (void* dst, size_t dstSize,
                  unsigned maxSymbolValue, unsigned huffLog, HUF_depthStrategy depthStrategy)
 {
     U64 workSpace[HUF_WORKSPACE_SIZE_U64];
-    return HUF_compress1X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, workSpace, sizeof(workSpace), depthStrategy);
+    return HUF_compress1X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, depthStrategy, workSpace, sizeof(workSpace));
 }
 
 size_t HUF_compress2 (void* dst, size_t dstSize,
@@ -1470,11 +1470,11 @@ size_t HUF_compress2 (void* dst, size_t dstSize,
                 unsigned maxSymbolValue, unsigned huffLog, HUF_depthStrategy depthStrategy)
 {
     U64 workSpace[HUF_WORKSPACE_SIZE_U64];
-    return HUF_compress4X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, workSpace, sizeof(workSpace), depthStrategy);
+    return HUF_compress4X_wksp(dst, dstSize, src, srcSize, maxSymbolValue, huffLog, depthStrategy, workSpace, sizeof(workSpace));
 }
 
-size_t HUF_compress (void* dst, size_t maxDstSize, const void* src, size_t srcSize, HUF_depthStrategy depthStrategy)
+size_t HUF_compress (void* dst, size_t maxDstSize, const void* src, size_t srcSize)
 {
-    return HUF_compress2(dst, maxDstSize, src, srcSize, 255, HUF_TABLELOG_DEFAULT, depthStrategy);
+    return HUF_compress2(dst, maxDstSize, src, srcSize, 255, HUF_TABLELOG_DEFAULT, HUF_default);
 }
 #endif

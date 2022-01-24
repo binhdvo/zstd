@@ -52,12 +52,8 @@ extern "C" {
  *  Special values : if return == 0, srcData is not compressible => Nothing is stored within dst !!!
  *                   if HUF_isError(return), compression failed (more details using HUF_getErrorName())
  */
-typedef enum {
-    HUF_default,
-    HUF_seek_neighbors
-} HUF_depthStrategy;
 HUF_PUBLIC_API size_t HUF_compress(void* dst, size_t dstCapacity,
-                             const void* src, size_t srcSize, HUF_depthStrategy depthStrategy);
+                             const void* src, size_t srcSize);
 
 /** HUF_decompress() :
  *  Decompress HUF data from buffer 'cSrc', of size 'cSrcSize',
@@ -84,6 +80,11 @@ HUF_PUBLIC_API const char* HUF_getErrorName(size_t code);  /**< provides error c
 
 /* ***   Advanced function   *** */
 
+typedef enum {
+    HUF_default,
+    HUF_seek_neighbors
+} HUF_depthStrategy;
+
 /** HUF_compress2() :
  *  Same as HUF_compress(), but offers control over `maxSymbolValue` and `tableLog`.
  * `maxSymbolValue` must be <= HUF_SYMBOLVALUE_MAX .
@@ -102,7 +103,7 @@ HUF_PUBLIC_API size_t HUF_compress2 (void* dst, size_t dstCapacity,
 HUF_PUBLIC_API size_t HUF_compress4X_wksp (void* dst, size_t dstCapacity,
                                      const void* src, size_t srcSize,
                                      unsigned maxSymbolValue, unsigned tableLog,
-                                     void* workSpace, size_t wkspSize, HUF_depthStrategy depthStrategy);
+                                     HUF_depthStrategy depthStrategy, void* workSpace, size_t wkspSize);
 
 #endif   /* HUF_H_298734234 */
 
@@ -312,7 +313,7 @@ size_t HUF_decompress4X2_usingDTable(void* dst, size_t maxDstSize, const void* c
 /* ====================== */
 
 size_t HUF_compress1X (void* dst, size_t dstSize, const void* src, size_t srcSize, unsigned maxSymbolValue, unsigned tableLog, HUF_depthStrategy depthStrategy);
-size_t HUF_compress1X_wksp (void* dst, size_t dstSize, const void* src, size_t srcSize, unsigned maxSymbolValue, unsigned tableLog, void* workSpace, size_t wkspSize, HUF_depthStrategy depthStrategy);  /**< `workSpace` must be a table of at least HUF_WORKSPACE_SIZE_U64 U64 */
+size_t HUF_compress1X_wksp (void* dst, size_t dstSize, const void* src, size_t srcSize, unsigned maxSymbolValue, unsigned tableLog, HUF_depthStrategy depthStrategy,void* workSpace, size_t wkspSize);  /**< `workSpace` must be a table of at least HUF_WORKSPACE_SIZE_U64 U64 */
 size_t HUF_compress1X_usingCTable(void* dst, size_t dstSize, const void* src, size_t srcSize, const HUF_CElt* CTable);
 size_t HUF_compress1X_usingCTable_bmi2(void* dst, size_t dstSize, const void* src, size_t srcSize, const HUF_CElt* CTable, int bmi2);
 /** HUF_compress1X_repeat() :
