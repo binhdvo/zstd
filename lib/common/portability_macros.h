@@ -65,6 +65,12 @@
 # endif
 #endif
 
+/* Mark the internal assembly functions as hidden  */
+#ifdef __ELF__
+# define ZSTD_HIDE_ASM_FUNCTION(func) .hidden func
+#else
+# define ZSTD_HIDE_ASM_FUNCTION(func)
+#endif
 
 /* Enable runtime BMI2 dispatch based on the CPU.
  * Enabled for clang & gcc >=4.8 on x86 when BMI2 isn't enabled by default.
@@ -126,6 +132,17 @@
 # define ZSTD_ENABLE_ASM_X86_64_BMI2 1
 #else
 # define ZSTD_ENABLE_ASM_X86_64_BMI2 0
+#endif
+
+/*
+ * For x86 ELF targets, add .note.gnu.property section for Intel CET in
+ * assembly sources when CET is enabled.
+ */
+#if defined(__ELF__) && (defined(__x86_64__) || defined(__i386__)) \
+    && defined(__has_include)
+# if __has_include(<cet.h>)
+#  include <cet.h>
+# endif
 #endif
 
 #endif /* ZSTD_PORTABILITY_MACROS_H */
