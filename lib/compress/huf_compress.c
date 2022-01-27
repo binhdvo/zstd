@@ -1339,12 +1339,6 @@ static size_t HUF_compressCTable_internal(
     return (size_t)(op-ostart);
 }
 
-
-unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, unsigned maxSymbolValue)
-{
-    return FSE_optimalTableLog_internal(maxTableLog, srcSize, maxSymbolValue, 1);
-}
-
 typedef struct {
     unsigned count[HUF_SYMBOLVALUE_MAX + 1];
     HUF_CElt CTable[HUF_CTABLE_SIZE_ST(HUF_SYMBOLVALUE_MAX)];
