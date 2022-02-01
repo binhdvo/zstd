@@ -584,8 +584,9 @@ unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigne
         U32 maxBits = BIT_highbit32((U32)(srcSize - 1)) - 1;
         U32 minBits = FSE_minTableLog(srcSize, maxSymbolValue);
         U32 tableLog = maxTableLog;
-        size_t estimatedSize = 0;
         size_t proposedSize = 0;
+        size_t bestSize = 0;
+        U32 bestLog = 0;
         HUF_CElt ct[HUF_CTABLE_SIZE(HUF_SYMBOLVALUE_MAX)];
         HUF_buildCTable_wksp_tables buildTableWorkspace;
         HUF_WriteCTableWksp writeTableWorkspace;
@@ -598,17 +599,21 @@ unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigne
         if (tableLog < minBits) tableLog = minBits;
 
         /* base size estimation */
-        ESTIMATE_SIZE(tableLog, estimatedSize);
+        ESTIMATE_SIZE(tableLog, bestSize);
+        bestLog = tableLog;
 
-        /* incrementally check neighboring depths */
-        for (; tableLog > minBits; tableLog--) {
-            ESTIMATE_SIZE(tableLog - 1, proposedSize);
-            if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
-                break;
-            estimatedSize = proposedSize;
+        /* iterate over viable depths */
+        for (U32 proposedLog = minBits; proposedLog <= maxBits; proposedLog++) {
+            if (proposedLog == tableLog)
+                continue;
+            ESTIMATE_SIZE(proposedLog, proposedSize);
+            if (proposedSize <= bestSize - IMPROVEMENT_THRESHOLD) {
+                bestSize = proposedSize;
+                bestLog = proposedLog;
+            }
         }
 
-        return tableLog;
+        return bestLog;
     }
     else {
         return FSE_optimalTableLog_internal(maxTableLog, srcSize, maxSymbolValue, 1);
