@@ -587,12 +587,12 @@ unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigne
         size_t estimatedSize = 0;
         size_t proposedSize = 0;
         HUF_CElt ct[HUF_CTABLE_SIZE(HUF_SYMBOLVALUE_MAX)];
-        unsigned movedUp = 0;
         HUF_buildCTable_wksp_tables buildTableWorkspace;
         HUF_WriteCTableWksp writeTableWorkspace;
 
         /* initial bounds */
         if (maxBits > HUF_TABLELOG_MAX) maxBits = HUF_TABLELOG_MAX;
+        if (maxBits > maxTableLog && maxTableLog != 0) maxBits = maxTableLog;
         if (tableLog == 0) tableLog = HUF_TABLELOG_DEFAULT;
         if (tableLog > maxBits) tableLog = maxBits;
         if (tableLog < minBits) tableLog = minBits;
@@ -601,16 +601,6 @@ unsigned HUF_optimalTableLog(unsigned maxTableLog, size_t srcSize, const unsigne
         ESTIMATE_SIZE(tableLog, estimatedSize);
 
         /* incrementally check neighboring depths */
-        for (; tableLog < maxBits; tableLog++) {
-            ESTIMATE_SIZE(tableLog + 1, proposedSize);
-            if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
-                break;
-            estimatedSize = proposedSize;
-            movedUp = 1;
-        }
-        if (movedUp)  // no point in scanning back down since we just came from that value
-            return tableLog;
-
         for (; tableLog > minBits; tableLog--) {
             ESTIMATE_SIZE(tableLog - 1, proposedSize);
             if (proposedSize >= estimatedSize - IMPROVEMENT_THRESHOLD)
